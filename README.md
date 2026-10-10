@@ -7,6 +7,11 @@
 ## Table of Contents
 
 - [Overview](#overview)
+- [The Problem — Why Traditional Claim Processing Fails](#the-problem--why-traditional-claim-processing-fails)
+- [Why Agentic AI?](#why-agentic-ai)
+- [What Agentic AI Solves in This Application](#what-agentic-ai-solves-in-this-application)
+- [How Agentic AI Works — Core Concepts](#how-agentic-ai-works--core-concepts)
+- [Application Deep Dive](#application-deep-dive)
 - [Architecture](#architecture)
 - [Agents](#agents)
 - [Data Flow](#data-flow)
@@ -26,7 +31,9 @@
 
 ## Overview
 
-Traditional claim processing relies on manual workflows that take days or weeks and are prone to coding errors, fraud, and compliance violations. This project demonstrates how **Agentic AI** — a network of specialised autonomous agents — can reduce claim cycle time from days to **seconds** while improving accuracy, auditability, and regulatory compliance.
+The US health insurance industry processes over **1.5 billion claims annually**. Despite this scale, most payers still rely on rule-engines and manual review queues that were designed in the 1990s. The result: slow payments, high administrative cost, rampant fraud, and frustrated patients and providers.
+
+This project demonstrates how **Agentic AI** — a network of specialised autonomous AI agents — can fundamentally reimagine claim finalization. Each agent owns a single responsibility, reasons over domain knowledge, takes autonomous actions, and hands its result to the next agent — all without human intervention in the happy path.
 
 ### Key Capabilities
 
@@ -38,6 +45,380 @@ Traditional claim processing relies on manual workflows that take days or weeks 
 | **HIPAA-aware** | PHI never logged; compliance checks built into pipeline |
 | **Auto-scaling** | OpenShift HPA scales pods 3 → 10 on CPU/memory pressure |
 | **Zero-downtime deploys** | Rolling updates with PodDisruptionBudget guarantee |
+
+---
+
+## The Problem — Why Traditional Claim Processing Fails
+
+### 1. Speed — Days, Not Seconds
+
+Traditional claim adjudication involves a **serial hand-off chain** across multiple departments:
+
+```
+Claim Received → Data Entry → Eligibility Desk → Coding Review →
+Fraud Unit → Adjudication Team → Payment Auth → EOB Mailing
+```
+
+Each hand-off can sit in a queue for hours or days. A simple office visit claim that should take seconds routinely takes **14–30 days** from submission to payment.
+
+**Impact:**
+- Providers wait months for reimbursement → cash flow pressure
+- Members receive EOBs weeks after treatment → confusion and disputes
+- Payers carry large accounts-payable balances → financial inefficiency
+
+---
+
+### 2. Accuracy — Errors Are Expensive
+
+The human error rate in medical coding is estimated at **20–30%** of all claims. Common mistakes:
+
+| Error Type | Example | Cost |
+|---|---|---|
+| Upcoding | Billing 99215 instead of 99213 | Overpayment + audit risk |
+| Downcoding | Under-billing to avoid audits | Lost provider revenue |
+| Unbundling | Billing separately what should be one code | Fraud / compliance violation |
+| Wrong ICD-10 | Non-specific code used (Z00 instead of Z00.00) | Claim denial + rework |
+| Duplicate claim | Same claim submitted twice | Duplicate payment |
+
+Each denied claim costs a provider an average of **$25–$118** to rework and resubmit.
+
+---
+
+### 3. Fraud — A $100 Billion Problem
+
+Healthcare fraud costs the US **$100 billion per year** (FBI estimate). Legacy rule-engines catch only the most obvious patterns. They cannot:
+
+- Detect **subtle anomalies** in provider billing patterns over time
+- Cross-reference claims against **multi-source watchlists** in real time
+- Score **combinations of signals** (high billed + unusual codes + new provider)
+- **Adapt** as fraudsters learn to stay just below rule thresholds
+
+---
+
+### 4. Compliance — HIPAA and CMS Complexity
+
+Payers must simultaneously comply with:
+- **HIPAA Privacy Rule** (§164.514) — PHI de-identification
+- **HIPAA Security Rule** — safeguards for electronic PHI
+- **CMS NPI Registry** — valid 10-digit National Provider Identifiers
+- **ICD-10-CM** code sets (70,000+ codes, updated annually)
+- **CPT** code sets (10,000+ codes, AMA-managed)
+- **State-specific** prompt-payment laws (30–45 day windows)
+
+Manual processes cannot consistently apply all these rules at scale.
+
+---
+
+### 5. Scalability — Volume Spikes Are Unpredictable
+
+Claim volumes spike after:
+- Natural disasters
+- Flu seasons / pandemics
+- Open enrollment periods
+- Major policy changes
+
+Static, monolithic adjudication systems have fixed capacity. When volume spikes, queues back up, SLAs are missed, and payers face regulatory penalties.
+
+---
+
+### The Status Quo — By the Numbers
+
+| Metric | Industry Average (Manual) | Target with Agentic AI |
+|---|---|---|
+| Claim cycle time | 14–30 days | < 5 seconds |
+| First-pass acceptance rate | 70–75% | > 95% |
+| Cost per claim | $15–$25 | < $2 |
+| Fraud detection rate | ~5% of fraudulent claims | > 40% flagged pre-payment |
+| Compliance violation rate | ~15% of processed claims | < 1% |
+| Scaling time under load | Hours (manual hire) | Seconds (HPA) |
+
+---
+
+## Why Agentic AI?
+
+### What Is an AI Agent?
+
+An AI agent is an autonomous software component that:
+
+1. **Perceives** its environment (receives structured input)
+2. **Reasons** using domain knowledge, rules, or a model
+3. **Acts** — takes a decision, calls a tool, queries a system
+4. **Reports** its result and transfers control to the next step
+
+Unlike a simple function call, an agent can **adapt its behaviour** based on what it observes. It does not just execute a fixed rule — it applies judgment.
+
+---
+
+### Why NOT Traditional Approaches?
+
+| Approach | Limitation |
+|---|---|
+| **Rule engines** (Drools, ILOG) | Cannot handle novel patterns; rules become unmanageable at scale (10,000+ rules in large payers) |
+| **Monolithic adjudication systems** | Tightly coupled; a change to fraud logic requires a full system release |
+| **RPA (Robotic Process Automation)** | Mimics human keystrokes; brittle to UI changes; no reasoning capability |
+| **Single LLM call** | No specialisation; a single model trying to do eligibility + coding + fraud + compliance in one prompt is unreliable and untestable |
+| **Microservices without orchestration** | Each service acts independently; no shared state; no coordinated decision pathway |
+
+---
+
+### Why Agentic AI IS the Right Fit
+
+#### ✅ Separation of Concerns
+Each agent is a **domain expert**. The `MedicalCodingAgent` only knows about ICD-10/CPT codes. The `FraudDetectionAgent` only knows about risk signals. This separation means each agent can be **tested, updated, and replaced independently**.
+
+#### ✅ Composability
+Agents are composed by the `OrchestratorAgent` into a pipeline. Adding a new check (e.g. a `DuplicateClaimAgent`) requires only inserting a new agent into the sequence — no changes to existing agents.
+
+#### ✅ Explainability
+Every agent records its action to an **immutable audit trail**. A compliance officer can see exactly which agent made which decision, at what time, and why — something opaque monoliths cannot provide.
+
+#### ✅ Autonomous Adaptation
+When the `FraudDetectionAgent` scores a claim as HIGH risk, it autonomously reroutes to `PENDING_REVIEW` without any human instruction. The system **self-routes** based on observed evidence.
+
+#### ✅ Failure Isolation
+If the `EligibilityAgent` fails (e.g. the coverage DB is down), only that stage fails. The orchestrator catches the error, records it, and routes the claim appropriately — it does not take down the entire system.
+
+#### ✅ Scalability
+Because each agent is a stateless function inside a containerised service, OpenShift's HPA can scale the entire pipeline horizontally under load — from 3 to 10 pods automatically — without any architectural changes.
+
+---
+
+## What Agentic AI Solves in This Application
+
+| Problem (from above) | Agent That Solves It | How |
+|---|---|---|
+| **Slow manual hand-offs** | `OrchestratorAgent` | Sequences all 7 agents in < 1 second end-to-end |
+| **ICD-10 / CPT coding errors** | `MedicalCodingAgent` | Validates every code against the full fee schedule before adjudication |
+| **Eligibility disputes** | `EligibilityAgent` | Checks member coverage in real time before any work is done |
+| **Pre-payment fraud** | `FraudDetectionAgent` | Scores 3 independent signals; routes HIGH risk before payment |
+| **HIPAA / CMS violations** | `ComplianceAgent` | Enforces §164.514 and NPI format on every single claim |
+| **Inaccurate payments** | `AdjudicationAgent` | Applies fee schedule + coinsurance formula deterministically |
+| **No audit trail** | All agents | Every agent writes a timestamped entry to the claim's audit log |
+| **Scalability spikes** | OpenShift HPA | Auto-scales pods from 3 → 10 within 60 seconds of CPU spike |
+| **Slow compliance reporting** | `ClaimFinalizationAgent` | Publishes a `ClaimFinalized` event instantly to downstream systems |
+
+---
+
+## How Agentic AI Works — Core Concepts
+
+### The Agent Contract
+
+Every agent in this system implements the same interface:
+
+```python
+class SomeAgent:
+    def run(self, claim: Claim) -> AgentResult:
+        # 1. Observe: read what you need from the claim
+        # 2. Reason:  apply domain logic
+        # 3. Act:     mutate claim status / set denial reason / calculate amount
+        # 4. Report:  return AgentResult(passed=True/False, payload={}, message="")
+```
+
+`AgentResult` is a simple value object:
+
+```python
+@dataclass
+class AgentResult:
+    agent_name: str   # which agent produced this
+    passed: bool      # did this check pass?
+    payload: Dict     # agent-specific output data
+    message: str      # human-readable summary
+```
+
+This contract means every agent is independently unit-testable and the orchestrator does not need to know anything about what happens inside each agent.
+
+---
+
+### The Orchestrator Pattern
+
+The `OrchestratorAgent` implements a **sequential pipeline with short-circuit evaluation**:
+
+```python
+for agent in [ingestion, eligibility, coding, fraud, compliance]:
+    result = agent.run(claim)
+    if not result.passed:
+        return self._deny(claim)   # stop immediately
+
+adjudication.run(claim)            # only reached if all checks passed
+finalization.run(claim)            # final step: persist + notify
+```
+
+This is analogous to a **logical AND** across all checks — if any single check fails, the pipeline short-circuits. This prevents wasted computation and ensures a denied claim is never partially adjudicated.
+
+---
+
+### The Claim State Machine
+
+The `Claim` object transitions through a defined set of states:
+
+```
+RECEIVED → VALIDATING → ADJUDICATING → APPROVED → FINALIZED
+                │                          │
+                └──────── DENIED ◄─────────┘
+                               │
+                          PENDING_REVIEW
+```
+
+State transitions are controlled exclusively by agents — no external code can set `claim.status` directly, ensuring the state machine is always consistent.
+
+---
+
+### The Audit Trail
+
+Every agent calls `claim.add_audit(agent_name, action, detail)` before returning. The result is an immutable, append-only list of events on the claim object:
+
+```json
+[
+  { "timestamp": "2024-07-15T10:00:01.123Z", "agent": "ClaimIngestionAgent",    "action": "INGESTED",          "detail": "Claim parsed and normalised" },
+  { "timestamp": "2024-07-15T10:00:01.145Z", "agent": "EligibilityAgent",       "action": "ELIGIBILITY_CHECK", "detail": "Eligible=True" },
+  { "timestamp": "2024-07-15T10:00:01.167Z", "agent": "MedicalCodingAgent",     "action": "CODE_VALIDATION",   "detail": "All codes valid" },
+  { "timestamp": "2024-07-15T10:00:01.189Z", "agent": "FraudDetectionAgent",    "action": "FRAUD_SCORE",       "detail": "Score=0 Risk=LOW Flags=[]" },
+  { "timestamp": "2024-07-15T10:00:01.201Z", "agent": "ComplianceAgent",        "action": "COMPLIANCE_CHECK",  "detail": "Passed" },
+  { "timestamp": "2024-07-15T10:00:01.215Z", "agent": "AdjudicationAgent",      "action": "ADJUDICATED",       "detail": "Allowed=305.0 Approved=244.0 (80% coinsurance)" },
+  { "timestamp": "2024-07-15T10:00:01.230Z", "agent": "ClaimFinalizationAgent", "action": "FINALIZED",         "detail": "Final status=FINALIZED Approved=$244.00" }
+]
+```
+
+This trail is **the complete decision log** — fully explainable, auditable, and exportable to a compliance data warehouse.
+
+---
+
+## Application Deep Dive
+
+### Domain Model
+
+The application is built around two core dataclasses defined in [`agents/claim_orchestrator.py`](agents/claim_orchestrator.py):
+
+#### `Claim`
+
+The central domain object that flows through the entire pipeline. Every agent reads from and writes to this object.
+
+```python
+@dataclass
+class Claim:
+    claim_id:        str            # unique identifier (UUID or payer-assigned)
+    member_id:       str            # insured member
+    provider_npi:    str            # 10-digit National Provider Identifier
+    service_date:    str            # ISO-8601 date of service
+    diagnosis_codes: List[str]      # ICD-10-CM codes (1 primary + optional secondary)
+    procedure_codes: List[str]      # CPT / HCPCS codes
+    billed_amount:   float          # total amount billed by provider (USD)
+    status:          ClaimStatus    # current pipeline state (enum)
+    approved_amount: float          # calculated by AdjudicationAgent
+    denial_reason:   Optional[str]  # set by first failing agent
+    audit_trail:     List[Dict]     # append-only event log
+```
+
+#### `ClaimStatus` Enum
+
+```python
+class ClaimStatus(str, Enum):
+    RECEIVED     = "RECEIVED"       # initial state on creation
+    VALIDATING   = "VALIDATING"     # intermediate (reserved)
+    ADJUDICATING = "ADJUDICATING"   # set by AdjudicationAgent on entry
+    APPROVED     = "APPROVED"       # set by AdjudicationAgent on success
+    DENIED       = "DENIED"         # set by any failing agent
+    PENDING      = "PENDING_REVIEW" # set by FraudDetectionAgent on HIGH score
+    FINALIZED    = "FINALIZED"      # terminal success state
+```
+
+#### `AgentResult`
+
+A lightweight value object returned by every agent `run()` method:
+
+```python
+@dataclass
+class AgentResult:
+    agent_name: str        # e.g. "FraudDetectionAgent"
+    passed:     bool       # False = pipeline should short-circuit
+    payload:    Dict       # agent-specific data (scores, amounts, flags)
+    message:    str        # human-readable outcome summary
+```
+
+---
+
+### Fee Schedule & Adjudication Logic
+
+The `AdjudicationAgent` uses a simplified fee schedule. In production this would be loaded from a database or external pricing API:
+
+| CPT Code | Description | Allowed Amount |
+|---|---|---|
+| `99213` | Office visit — low complexity | $150.00 |
+| `99214` | Office visit — moderate complexity | $210.00 |
+| `99215` | Office visit — high complexity | $280.00 |
+| `93000` | ECG with interpretation | $95.00 |
+| `71046` | Chest X-ray (2 views) | $320.00 |
+
+**Payment formula:**
+```
+allowed_amount  = Σ fee_schedule[cpt_code]   for each procedure code
+approved_amount = allowed_amount × coinsurance_rate   (default: 0.80)
+member_liability = allowed_amount × (1 - coinsurance_rate)   (default: 0.20)
+```
+
+**Example** — claim with `99214` + `93000`:
+```
+allowed_amount  = $210.00 + $95.00 = $305.00
+approved_amount = $305.00 × 0.80  = $244.00   ← payer pays this
+member_liability = $305.00 × 0.20  =  $61.00  ← member pays this
+```
+
+---
+
+### Fraud Scoring Model
+
+The `FraudDetectionAgent` uses a **weighted signal scoring model**:
+
+```
+fraud_score = 0
+
+if billed_amount > $10,000:      score += 40
+if len(procedure_codes) > 5:     score += 20
+if provider_npi in watchlist:    score += 50
+
+risk_level = LOW    (score  < 30)
+           = MEDIUM (score 30–59)  → continue, flag for post-pay review
+           = HIGH   (score ≥ 60)   → PENDING_REVIEW, stop pipeline
+```
+
+The model is intentionally simple in this demo. A production implementation would integrate with a machine learning model trained on historical claims, incorporating:
+- Provider billing pattern deviation (Z-score vs. peer group)
+- Member utilisation outliers
+- Geographic anomalies
+- Time-of-day / day-of-week signal
+- Network / out-of-network mismatches
+
+---
+
+### REST API Layer
+
+The [`agents/api.py`](agents/api.py) file wraps the orchestrator in a **FastAPI** application. FastAPI was chosen because:
+
+- **Automatic OpenAPI docs** at `/docs` (Swagger UI) — useful for provider portals and integration testing
+- **Pydantic validation** — request body is validated before it ever reaches the agent pipeline
+- **Async-ready** — can be extended to async agents using `async def run()` with `await`
+- **Lightweight** — minimal overhead; Uvicorn ASGI server handles thousands of concurrent requests
+
+The three endpoints:
+
+```
+GET  /health                  → liveness probe (used by OpenShift readiness check)
+POST /claims/process          → full agentic pipeline
+GET  /claims/{claim_id}/status → persistence layer query
+```
+
+---
+
+### Why Python 3.12?
+
+| Feature | Benefit in This Codebase |
+|---|---|
+| `@dataclass` | Clean domain models (`Claim`, `AgentResult`) with no boilerplate |
+| Type hints | Every agent `run()` is fully typed → better IDE support + static analysis |
+| `Enum` (str) | `ClaimStatus` values serialise to JSON strings automatically |
+| f-strings | Readable log messages in each agent |
+| `match` statement (3.10+) | Available for future agent routing logic |
+| Speed improvements (3.12) | ~5% interpreter speed improvement over 3.11 |
 
 ---
 
