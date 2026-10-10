@@ -13,6 +13,7 @@
 - [How Agentic AI Works — Core Concepts](#how-agentic-ai-works--core-concepts)
 - [Application Deep Dive](#application-deep-dive)
 - [Architecture](#architecture)
+- [Model Integration — Anthropic Claude](#model-integration--anthropic-claude)
 - [Agents](#agents)
 - [Data Flow](#data-flow)
 - [Project Structure](#project-structure)
@@ -444,6 +445,8 @@ GET  /claims/{claim_id}/status → persistence layer query
 | Layer | Technology |
 |---|---|
 | Language | Python 3.12 |
+| **AI Model** | **Anthropic Claude (`claude-3-5-sonnet-20241022`)** |
+| **AI SDK** | **`anthropic` Python SDK ≥ 0.28** |
 | API Framework | FastAPI + Uvicorn |
 | Containerisation | Docker (multi-stage) |
 | CI/CD | Jenkins Declarative Pipeline |
@@ -451,6 +454,120 @@ GET  /claims/{claim_id}/status → persistence layer query
 | Code Quality | SonarQube, flake8 |
 | Security Scanning | Bandit (SAST), Safety (CVE), Trivy (image) |
 | Test Framework | pytest + pytest-cov |
+
+---
+
+## Model Integration — Anthropic Claude
+
+### Which Model Is Used?
+
+| Model | Version | Purpose |
+|---|---|---|
+| Anthropic Claude | `claude-3-5-sonnet-20241022` | Clinical coherence review + fraud reasoning |
+
+Claude is accessed via the official [`anthropic` Python SDK](https://github.com/anthropics/anthropic-sdk-python) through a shared [`agents/llm_client.py`](agents/llm_client.py) module.
+
+---
+
+### Why Claude for These Two Agents?
+
+#### `MedicalCodingAgent` — Clinical Coherence (Layer 2)
+Simple whitelist matching catches *unknown* codes (Layer 1), but it cannot detect *wrong* combinations — e.g. billing a Chest X-ray (`71046`) for a claim where the only diagnosis is Type 2 Diabetes (`E11.9`). That requires **medical reasoning**. Claude acts as a virtual certified medical coder reviewing whether the diagnosis + procedure combination is clinically sensible.
+
+#### `FraudDetectionAgent` — Holistic Fraud Reasoning (Layer 2)
+Rules catch obvious fraud (NPI on watchlist, extreme amounts). But subtle fraud requires considering *multiple signals together* — a $450 claim with an unusual code mix and a new provider may look innocent in isolation but suspicious as a combination. Claude acts as a virtual SIU analyst reasoning over the full claim picture.
+
+> **Principle:** Use an LLM where **judgment, reasoning, or language understanding** is required. Use deterministic rules where **exactness or auditability** is required. Never use an LLM where a simple lookup or formula suffices.
+
+---
+
+### LLM Call Design
+
+Each LLM-powered agent sends a **structured prompt** and expects a **JSON response**:
+
+**`MedicalCodingAgent` asks Claude:**
+```
+System: You are a certified medical coder and clinical reviewer...
+User:   Review the following claim for clinical coherence...
+        Respond with: { "coherent": bool, "confidence": "HIGH|MEDIUM|LOW",
+                        "issues": [...], "recommendation": "APPROVE|DENY|MANUAL_REVIEW",
+                        "explanation": "..." }
+```
+
+**`FraudDetectionAgent` asks Claude:**
+```
+System: You are a senior SIU analyst specialising in FWA detection...
+User:   Assess this claim for fraud, waste, or abuse...
+        Respond with: { "fraud_risk": "LOW|MEDIUM|HIGH", "confidence": "HIGH|MEDIUM|LOW",
+                        "fraud_patterns_detected": [...], "recommendation": "...",
+                        "risk_score": 0-100, "explanation": "..." }
+```
+
+The [`LLMClient.chat_json()`](agents/llm_client.py) helper:
+1. Appends `"Respond ONLY with valid JSON"` to the system prompt
+2. Strips accidental markdown fences (` ```json … ``` `)
+3. Parses the response with `json.loads()`
+4. Falls back to `{"raw": ..., "parse_error": True}` on parse failure
+
+---
+
+### Decision Logic (Confidence Gating)
+
+Claude's output is not blindly trusted. The agents apply **confidence gating** before acting on the LLM's verdict:
+
+| Agent | LLM says | Confidence | Action |
+|---|---|---|---|
+| `MedicalCodingAgent` | `coherent=false` | HIGH or MEDIUM | **DENY** |
+| `MedicalCodingAgent` | `coherent=false` | LOW | Continue (flag for review) |
+| `MedicalCodingAgent` | `recommendation=MANUAL_REVIEW` | any | Continue + add audit flag |
+| `FraudDetectionAgent` | `fraud_risk=HIGH` | HIGH or MEDIUM | **PENDING_REVIEW** |
+| `FraudDetectionAgent` | `fraud_risk=HIGH` | LOW | Continue (flag for review) |
+| `FraudDetectionAgent` | `fraud_risk=MEDIUM` | any | Continue + add audit flag |
+
+This prevents a single uncertain or hallucinated LLM response from incorrectly denying a valid claim.
+
+---
+
+### Fast-Fail Optimisation
+
+`FraudDetectionAgent` runs deterministic rules **first**. If the rule score reaches HIGH (≥ 60), it returns immediately without calling Claude — saving latency and cost:
+
+```
+Rule score ≥ 60 (HIGH) → skip LLM → PENDING_REVIEW immediately
+Rule score  < 60        → call Claude → use LLM verdict
+```
+
+This means a claim from a known-bad NPI with a huge billed amount is rejected in microseconds, not after an LLM round-trip.
+
+---
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `ANTHROPIC_API_KEY` | ✅ Yes | — | API key from [console.anthropic.com](https://console.anthropic.com/) |
+| `ANTHROPIC_MODEL` | No | `claude-3-5-sonnet-20241022` | Override model name |
+| `ANTHROPIC_MAX_TOKENS` | No | `1024` | Max tokens per LLM response |
+| `ANTHROPIC_TEMPERATURE` | No | `0.0` | Temperature (0 = deterministic) |
+
+Copy [`.env.example`](.env.example) to `.env` and fill in your key:
+
+```bash
+cp .env.example .env
+# Edit .env and set ANTHROPIC_API_KEY=sk-ant-api03-...
+```
+
+---
+
+### LLM Call in Tests
+
+All LLM calls are **mocked** in tests — no real API key is needed to run the test suite:
+
+```bash
+pytest tests/ -v   # runs in < 1 second, no network calls
+```
+
+The mock injects pre-defined JSON responses and also verifies the **fast-fail** behaviour (LLM is NOT called when rule score is already HIGH).
 
 ---
 
