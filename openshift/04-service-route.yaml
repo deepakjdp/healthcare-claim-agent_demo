@@ -1,0 +1,46 @@
+# ──────────────────────────────────────────────────────────────────
+# Service — internal cluster traffic
+# ──────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: claim-finalization-agent
+  namespace: healthcare-prod
+  labels:
+    app: claim-finalization-agent
+spec:
+  selector:
+    app: claim-finalization-agent
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP
+  type: ClusterIP
+
+---
+# ──────────────────────────────────────────────────────────────────
+# Route — OpenShift edge-terminated HTTPS ingress
+# ──────────────────────────────────────────────────────────────────
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: claim-finalization-agent
+  namespace: healthcare-prod
+  labels:
+    app: claim-finalization-agent
+  annotations:
+    haproxy.router.openshift.io/timeout: "60s"
+    haproxy.router.openshift.io/balance: "roundrobin"
+spec:
+  host: claim-agent.apps.ocp.example.com
+  to:
+    kind: Service
+    name: claim-finalization-agent
+    weight: 100
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None

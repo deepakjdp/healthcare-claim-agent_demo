@@ -1,0 +1,38 @@
+# ──────────────────────────────────────────────────────────────────
+# ServiceAccount — least-privilege identity for the agent pods
+# ──────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: claim-agent-sa
+  namespace: healthcare-prod
+  labels:
+    app: claim-finalization-agent
+
+---
+# ── RBAC: Role ─────────────────────────────────────────────────────
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: claim-agent-role
+  namespace: healthcare-prod
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "watch"]
+
+---
+# ── RBAC: RoleBinding ──────────────────────────────────────────────
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: claim-agent-rolebinding
+  namespace: healthcare-prod
+subjects:
+  - kind: ServiceAccount
+    name: claim-agent-sa
+    namespace: healthcare-prod
+roleRef:
+  kind: Role
+  apiGroup: rbac.authorization.k8s.io
+  name: claim-agent-role

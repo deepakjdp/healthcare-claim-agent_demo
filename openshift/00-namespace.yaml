@@ -1,0 +1,10 @@
+# ──────────────────────────────────────────────────────────────────
+# OpenShift Namespace / Project
+# ──────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: healthcare-prod
+  labels:
+    app.kubernetes.io/part-of: claim-finalization
+    environment: production
